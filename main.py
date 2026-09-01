@@ -759,7 +759,7 @@ def handle_seen_callback(call):
     user_message_id = int(parts[2])
 
     try:
-        bot.send_message(user_id, "👀 سجاد این پیامت رو دید.", reply_to_message_id=user_message_id)
+        bot.send_message(user_id, "این پیامت رو دید.", reply_to_message_id=user_message_id)
         bot.answer_callback_query(call.id, "سین زده شد ✅")
     except Exception:
         bot.answer_callback_query(call.id, "ارسال سین با خطا مواجه شد.")
