@@ -237,6 +237,16 @@ SUPPORTED_TYPES = [
 ]
 
 
+def build_sender_header(base_header, user):
+    """
+    یه هدر پایه میگیره و آیدی عددی + یوزرنیم فرستنده رو بهش اضافه میکنه.
+    فقط باید موقع ارسال پیام کاربرا به آتنا استفاده بشه (تا ناشناس بودن کاربر
+    برای بقیه کاربرا حفظ بشه).
+    """
+    uname = f"@{user.username}" if user.username else "بدون یوزرنیم"
+    return f"{base_header}\n🆔 آیدی: {user.id}\n👤 یوزرنیم: {uname}"
+
+
 def forward_message(message, to_chat_id, to_message_id, header, reply_markup=None):
     """
     پیام (از هر نوعی که باشه) رو با یه هدر مشخص به مقصد میفرسته
@@ -675,7 +685,13 @@ def handle_user_message(message):
             to_message_id = link["to_message_id"]
 
     reply_markup = action_buttons(chat_id, message.message_id) if to_chat_id == ATHENA_ID else None
-    sent_ids = forward_message(message, to_chat_id, to_message_id, "📩 پیام ناشناس جدید:", reply_markup=reply_markup)
+
+    base_header = "📩 پیام ناشناس جدید:"
+    # فقط وقتی مقصد خودِ آتناست هدر رو با آیدی/یوزرنیم فرستنده پر میکنیم،
+    # تا در مسیرهای دیگه (اگه پیش بیاد) ناشناس بودن کاربر برای بقیه حفظ بشه.
+    header = build_sender_header(base_header, message.from_user) if to_chat_id == ATHENA_ID else base_header
+
+    sent_ids = forward_message(message, to_chat_id, to_message_id, header, reply_markup=reply_markup)
 
     for sid in sent_ids:
         set_link(to_chat_id, sid, chat_id, message.message_id)
