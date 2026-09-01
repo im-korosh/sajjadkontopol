@@ -1,0 +1,3 @@
+pyTelegramBotAPI
+python-dotenv
+Korosh1387k
