@@ -162,6 +162,16 @@ def block_user(user_id):
     conn.commit()
 
 
+def unblock_user(user_id):
+    """
+    یه کاربر خاص رو از لیست بلاک درمیاره.
+    اگه واقعا بلاک بوده و حذف شده True برمیگرده، وگرنه False.
+    """
+    cur = conn.execute("DELETE FROM blocked_users WHERE id = ?", (int(user_id),))
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def count_blocked():
     cur = conn.execute("SELECT COUNT(*) FROM blocked_users")
     return cur.fetchone()[0]
@@ -172,6 +182,19 @@ def unblock_all():
     conn.execute("DELETE FROM blocked_users")
     conn.commit()
     return count
+
+
+def get_blocked_users_detailed():
+    """
+    لیست کاربرای بلاک شده رو به همراه اسم و یوزرنیمشون (اگه تو جدول users باشن) برمیگردونه.
+    """
+    cur = conn.execute("""
+        SELECT b.id, u.first_name, u.username
+        FROM blocked_users b
+        LEFT JOIN users u ON u.id = b.id
+        ORDER BY b.id
+    """)
+    return cur.fetchall()
 
 
 
@@ -287,6 +310,15 @@ def action_buttons(user_id, user_message_id):
     return kb
 
 
+def blocked_user_button(user_id):
+    """
+    کیبورد شیشه‌ای مخصوص هر کاربر بلاک‌شده تو لیست، با دکمه آنبلاک کردن همون کاربر.
+    """
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("✅ آنبلاک کردن این کاربر", callback_data=f"unblock:{user_id}"))
+    return kb
+
+
 def update_button_in_markup(call, prefix, new_text, new_callback):
     """
     از رو کیبورد شیشه‌ای فعلیِ پیام، فقط دکمه‌ای که callback_data ش با prefix شروع میشه رو
@@ -321,6 +353,7 @@ BTN_OFF_TEXT = "✏️ تغییر تکست خاموش بودن ربات"
 BTN_BACK = "🔙 بازگشت"
 
 BTN_UNBLOCK_ALL = "🔓 آنبلاک کردن همه"
+BTN_BLOCK_LIST = "📋 لیست کاربرای بلاک شده (تکی)"
 
 BTN_FILTER_ADD = "➕ افزودن کلمه فیلتر"
 BTN_FILTER_REMOVE = "➖ حذف کلمه فیلتر"
@@ -330,7 +363,7 @@ MENU_BUTTON_TEXTS = {
     BTN_SETTINGS_FOLDER, BTN_STATS, BTN_BLOCK_MANAGE, BTN_BROADCAST, BTN_FILTER_MANAGE,
     BTN_TOGGLE_ON, BTN_TOGGLE_OFF,
     BTN_WELCOME, BTN_CONFIRM, BTN_ANON, BTN_BROADCAST_TEXT, BTN_OFF_TEXT,
-    BTN_UNBLOCK_ALL, BTN_FILTER_ADD, BTN_FILTER_REMOVE, BTN_FILTER_LIST,
+    BTN_UNBLOCK_ALL, BTN_BLOCK_LIST, BTN_FILTER_ADD, BTN_FILTER_REMOVE, BTN_FILTER_LIST,
 }
 
 SETTING_LABELS = {
@@ -364,6 +397,7 @@ def settings_menu_keyboard():
 
 def block_menu_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row(BTN_BLOCK_LIST)
     kb.row(BTN_UNBLOCK_ALL)
     kb.row(BTN_BACK)
     return kb
@@ -404,6 +438,24 @@ def unblock_all_action(chat_id):
         f"✅ همه ({count} نفر) آنبلاک شدن.\n🚫 تعداد کاربرای بلاک‌شده الان: 0",
         reply_markup=block_menu_keyboard(),
     )
+
+
+def send_blocked_users_list(chat_id):
+    """
+    برای هر کاربر بلاک‌شده یه پیام جدا با دکمه‌ی مخصوص آنبلاک کردن همون کاربر میفرسته،
+    تا ادمین بتونه دونه‌دونه تصمیم بگیره کیو آنبلاک کنه.
+    """
+    users = get_blocked_users_detailed()
+    if not users:
+        bot.send_message(chat_id, "هیچ کاربر بلاک‌شده‌ای وجود نداره.", reply_markup=block_menu_keyboard())
+        return
+
+    bot.send_message(chat_id, f"🚫 لیست کاربرای بلاک شده ({len(users)} نفر):", reply_markup=block_menu_keyboard())
+    for uid, first_name, username in users:
+        uname = f"@{username}" if username else "بدون یوزرنیم"
+        name = first_name or "-"
+        text = f"👤 {name}\n{uname}\n🆔 آیدی: {uid}"
+        bot.send_message(chat_id, text, reply_markup=blocked_user_button(uid))
 
 
 def send_filter_menu(chat_id):
@@ -615,6 +667,9 @@ def handle_athena_menu(message):
     if text == BTN_UNBLOCK_ALL:
         unblock_all_action(chat_id)
         return True
+    if text == BTN_BLOCK_LIST:
+        send_blocked_users_list(chat_id)
+        return True
     if text == BTN_FILTER_ADD:
         athena_state["waiting_for"] = "filter_add"
         bot.send_message(
@@ -746,6 +801,41 @@ def handle_block_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == "noop")
 def handle_noop_callback(call):
     bot.answer_callback_query(call.id, "این کاربر قبلاً بلاک شده.")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("unblock:"))
+def handle_unblock_callback(call):
+    """
+    وقتی ادمین رو دکمه‌ی آنبلاک مخصوص یه کاربر (تو لیست کاربرای بلاک شده) بزنه،
+    فقط همون یه کاربر آنبلاک میشه.
+    """
+    if call.message.chat.id != ATHENA_ID:
+        bot.answer_callback_query(call.id)
+        return
+
+    user_id = call.data.split(":", 1)[1]
+
+    if not is_blocked(user_id):
+        bot.answer_callback_query(call.id, "این کاربر قبلاً آنبلاک شده بود.")
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        return
+
+    unblock_user(user_id)
+    bot.answer_callback_query(call.id, "✅ کاربر آنبلاک شد.")
+    try:
+        bot.edit_message_text(
+            call.message.text + "\n\n✅ آنبلاک شد",
+            call.message.chat.id,
+            call.message.message_id,
+        )
+    except Exception:
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("seen:"))
